@@ -8,13 +8,12 @@
 <title>Excel Merge Tool</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--text:#1c2430;--muted:#667085;--line:#d9dee7;--accent:#1f6feb;--accent-t:#fff;--ok:#157f3b;--err:#c0392b;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#f6f7f9;--card:#fff;--text:#1c2430;--muted:#667085;--line:#d9dee7;--accent:#1f6feb;--accent-t:#fff;--ok:#157f3b;--err:#c0392b}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171c;--card:#1d222a;--text:#e8ecf2;--muted:#9aa5b5;--line:#313845;--accent:#4c8dff;--accent-t:#fff;--ok:#4cc27a;--err:#ff7b6b}}
 :root[data-theme="dark"]{--bg:#14171c;--card:#1d222a;--text:#e8ecf2;--muted:#9aa5b5;--line:#313845;--accent:#4c8dff;--accent-t:#fff;--ok:#4cc27a;--err:#ff7b6b}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,"Noto Sans Khmer",sans-serif;line-height:1.5}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,"Noto Sans Khmer",sans-serif;line-height:1.5;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
 h1{font-size:22px;margin:0 0 4px}
 p.sub{margin:0 0 16px;color:var(--muted);font-size:14px}
@@ -80,6 +79,14 @@ label{display:flex;gap:8px;align-items:flex-start;font-size:14px;margin:6px 0}
   var $=function(id){return document.getElementById(id)};
   var drop=$('drop'), input=$('file');
 
+  // Download capability (works inside the hosted page). null = not available.
+  var downloads=null;
+  try{
+    if(window.claude&&claude.use){
+      claude.use('downloads').then(function(d){downloads=d||null}).catch(function(){downloads=null});
+    }
+  }catch(e){downloads=null}
+
   drop.addEventListener('click',function(){input.click()});
   input.addEventListener('change',function(){addFiles(input.files);input.value=''});
   ['dragover','dragenter'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over')})});
@@ -140,6 +147,25 @@ label{display:flex;gap:8px;align-items:flex-start;font-size:14px;margin:6px 0}
 
   $('clear').onclick=function(){files=[];render();say('')};
 
+  // Save: use the hosted-page download capability; fall back to a normal
+  // browser download when the page is opened as a plain file.
+  function saveFile(buf, filename){
+    if(downloads){
+      return downloads.save({filename:filename,data:buf});
+    }
+    return new Promise(function(res,rej){
+      try{
+        var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a');
+        a.href=url;a.download=filename;
+        document.body.appendChild(a);a.click();
+        setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url)},100);
+        res({status:'saved'});
+      }catch(e){rej(e)}
+    });
+  }
+
   $('merge').onclick=function(){
     if(!files.length)return;
     var list=files.slice();
@@ -175,15 +201,13 @@ label{display:flex;gap:8px;align-items:flex-start;font-size:14px;margin:6px 0}
     }
     var buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
     var dataRows=out.length-(hdr?1:0);
-    claude.use('downloads').then(function(dl){
-      if(!dl){say('Saving is not available in this view. Open the artifact page in claude.ai to download.','err');return}
-      dl.save({filename:'Combined-'+dataRows+'-rows.xlsx',data:buf}).then(function(){
-        say('Done: '+dataRows+' rows merged from '+list.length+' files.'+dedupMsg,'ok');
-      }).catch(function(e){
-        if(e&&e.code==='declined')say('Download cancelled.');
-        else say('Could not save: '+((e&&e.message)||'unknown error'),'err');
-      });
-    });
+    var btn=$('merge');btn.disabled=true;
+    saveFile(buf,'Combined-'+dataRows+'-rows.xlsx').then(function(){
+      say('Done: '+dataRows+' rows merged from '+list.length+' files.'+dedupMsg,'ok');
+    }).catch(function(e){
+      if(e&&e.code==='declined')say('Download cancelled. Click again to save.','err');
+      else say('Could not save: '+((e&&e.message)||'unknown error'),'err');
+    }).then(function(){btn.disabled=false});
   };
 })();
 </script>
